@@ -164,16 +164,21 @@ uv run python scripts/benchmark_servers.py --auto-start --runs 5
 
 | Text Length | PyTorch | MLX | Speedup |
 |-------------|---------|-----|---------|
-| Short (~2 words) | 224ms | 342ms | 0.66x |
-| Medium (~12 words) | 716ms | 566ms | **1.26x** |
-| Long (~35 words) | 2065ms | 1469ms | **1.41x** |
-| **Overall** | 1002ms | 793ms | **1.26x** |
+| Short (~2 words) | 200ms | 107ms | **1.88x** |
+| Medium (~12 words) | 666ms | 355ms | **1.88x** |
+| Long (~35 words) | 1851ms | 1192ms | **1.55x** |
+| **Overall** | 906ms | 551ms | **1.64x** |
+
+| Metric | PyTorch | MLX | Winner |
+|--------|---------|-----|--------|
+| Time to First Byte | 59ms | 25ms | **MLX 2.4x faster** |
+| Real-time Factor | 0.15x | 0.10x | **MLX** |
 
 **Key findings:**
-- MLX is **1.26x faster overall** for total generation time
-- MLX scales better with text length (1.41x faster for long text)
-- Both achieve **6-8x faster than real-time** playback
-- PyTorch has faster time-to-first-byte (61ms vs 217ms) due to MLX's lazy evaluation
+- MLX is **1.64x faster overall** for total generation time
+- MLX has **2.4x faster time-to-first-byte** (25ms vs 59ms)
+- Both achieve **7-10x faster than real-time** playback
+- Voice embeddings are cached for consistent low-latency responses
 
 ### CLI Performance
 

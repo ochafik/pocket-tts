@@ -303,6 +303,14 @@ def serve(
     default_voice = voice
     logger.info(f"Default voice set to: {default_voice}")
 
+    # Warmup: run a short generation to compile MLX graphs
+    logger.info("Warming up model (compiling MLX graphs)...")
+    warmup_start = __import__("time").perf_counter()
+    for _ in tts_model.generate_audio_stream(text="Hello.", voice=default_voice):
+        pass  # Discard output, just compile the graphs
+    warmup_time = __import__("time").perf_counter() - warmup_start
+    logger.info(f"Warmup completed in {warmup_time*1000:.0f}ms")
+
     logger.info(f"Starting server at http://{host}:{port}")
     uvicorn.run(web_app, host=host, port=port)
 

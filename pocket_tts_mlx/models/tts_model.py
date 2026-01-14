@@ -225,7 +225,15 @@ class TTSModel(nn.Module):
         for step in range(max_gen_len):
             # Generate next latent
             next_latent, is_eos = self._run_flow_lm(backbone_input_latents=backbone_input)
-            mx.eval(next_latent, is_eos)
+
+            # Decode to audio (build full graph before eval)
+            mimi_input = next_latent * self.flow_lm.emb_std + self.flow_lm.emb_mean
+            mimi_input = mimi_input.swapaxes(-1, -2)  # NLC -> NCL
+            quantized = self.mimi.quantizer(mimi_input)
+            audio_frame = self.mimi.decode_from_latent_step(quantized)
+
+            # Single eval for entire step (reduces graph compilation overhead)
+            mx.eval(next_latent, is_eos, audio_frame)
 
             # Check EOS
             if bool(is_eos[0, 0]) and eos_step is None:
@@ -234,13 +242,6 @@ class TTSModel(nn.Module):
 
             if eos_step is not None and step >= eos_step + frames_after_eos:
                 break
-
-            # Decode to audio
-            mimi_input = next_latent * self.flow_lm.emb_std + self.flow_lm.emb_mean
-            mimi_input = mimi_input.swapaxes(-1, -2)  # NLC -> NCL
-            quantized = self.mimi.quantizer(mimi_input)
-            audio_frame = self.mimi.decode_from_latent_step(quantized)
-            mx.eval(audio_frame)
 
             # Yield audio chunk (remove batch and channel dims)
             chunk = audio_frame[0, 0]

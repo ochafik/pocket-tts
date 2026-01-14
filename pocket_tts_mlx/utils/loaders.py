@@ -63,8 +63,11 @@ def download_if_necessary(file_path: str) -> Path:
         return Path(file_path)
 
 
+_voice_cache: dict[str, "mx.array"] = {}
+
+
 def load_predefined_voice(voice_name: str) -> mx.array:
-    """Load a predefined voice embedding.
+    """Load a predefined voice embedding (cached).
 
     Args:
         voice_name: Name of the predefined voice
@@ -72,6 +75,10 @@ def load_predefined_voice(voice_name: str) -> mx.array:
     Returns:
         Audio prompt tensor
     """
+    # Check cache first
+    if voice_name in _voice_cache:
+        return _voice_cache[voice_name]
+
     if voice_name not in PREDEFINED_VOICES:
         raise ValueError(
             f"Predefined voice '{voice_name}' not found, "
@@ -79,7 +86,11 @@ def load_predefined_voice(voice_name: str) -> mx.array:
         )
     voice_file = download_if_necessary(PREDEFINED_VOICES[voice_name])
     weights = mx.load(str(voice_file))
-    return weights["audio_prompt"]
+    audio_prompt = weights["audio_prompt"]
+
+    # Cache for future requests
+    _voice_cache[voice_name] = audio_prompt
+    return audio_prompt
 
 
 def load_safetensors_weights(file_path: str) -> dict[str, mx.array]:
