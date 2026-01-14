@@ -6,6 +6,7 @@ import threading
 from pathlib import Path
 from queue import Queue
 
+import torch
 import typer
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -219,14 +220,19 @@ def generate(
         int, typer.Option(help="Number of frames to generate after EOS")
     ] = DEFAULT_FRAMES_AFTER_EOS,
     output_path: Annotated[
-        str, typer.Option(help="Output path for generated audio")
+        str, typer.Option("-o", "--output-path", help="Output path for generated audio")
     ] = "./tts_output.wav",
     device: Annotated[str, typer.Option(help="Device to use")] = "cpu",
+    seed: Annotated[int | None, typer.Option(help="Random seed for reproducibility")] = None,
 ):
     """Generate speech using Kyutai Pocket TTS."""
     if "cuda" in device:
         # Cuda graphs capturing does not play nice with multithreading.
         os.environ["NO_CUDA_GRAPH"] = "1"
+
+    # Set random seed if provided
+    if seed is not None:
+        torch.manual_seed(seed)
 
     log_level = logging.ERROR if quiet else logging.INFO
     with enable_logging("pocket_tts", log_level):
