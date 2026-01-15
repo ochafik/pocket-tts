@@ -60,7 +60,10 @@ build-backend = "hatchling.build"
 packages = ["pocket_tts", "pocket_tts_mlx"]
 
 [project.scripts]
-pocket-tts = "pocket_tts.main:cli_app"
+# Unified CLI with auto-detection (recommended)
+pocket-tts = "pocket_tts.cli:cli_app"
+# Backend-specific CLIs (for explicit control)
+pocket-tts-torch = "pocket_tts.main:cli_app"
 pocket-tts-mlx = "pocket_tts_mlx.main:cli_app"
 
 [project.optional-dependencies]
