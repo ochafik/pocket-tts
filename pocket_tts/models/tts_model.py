@@ -203,6 +203,33 @@ class TTSModel(nn.Module):
         )
         return tts_model
 
+    def compile_model(self, mode: str = "reduce-overhead") -> Self:
+        """Compile the model using torch.compile for faster CPU inference.
+
+        This method applies torch.compile to the flow network (SimpleMLPAdaLN),
+        which is the most frequently called component during generation.
+        The first inference will be slower due to compilation warmup.
+
+        Note: Requires setuptools to be installed for CPU compilation.
+
+        Args:
+            mode: Compilation mode. Options:
+                - "reduce-overhead": Best for batch_size=1 (recommended)
+                - "default": Balanced compilation
+                - "max-autotune": Slower warmup, tries multiple implementations
+
+        Returns:
+            self for method chaining
+        """
+        logger.info(f"Compiling flow network with mode='{mode}'...")
+        self.flow_lm.flow_net = torch.compile(
+            self.flow_lm.flow_net,
+            mode=mode,
+            fullgraph=False,  # Allow graph breaks for dynamic control flow
+        )
+        logger.info("Flow network compiled. First inference will trigger warmup.")
+        return self
+
     def _run_flow_lm_and_increment_step(
         self,
         model_state: dict,

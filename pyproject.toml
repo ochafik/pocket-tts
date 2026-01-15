@@ -71,6 +71,10 @@ mlx = [
     # MLX only works on macOS ARM64 (Apple Silicon)
     "mlx>=0.22.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
+compile = [
+    # Required for torch.compile CPU backend
+    "setuptools>=60.0.0",
+]
 
 [tool.uv]
 # System python distribution can have header files missing, so we use only the python

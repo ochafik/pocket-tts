@@ -40,6 +40,9 @@ def serve(
     ] = 0.9,
     noise_clamp: Annotated[float, typer.Option(help="Noise clamp value")] = 3.0,
     eos_threshold: Annotated[float, typer.Option(help="EOS detection threshold")] = -4.0,
+    compile: Annotated[
+        bool, typer.Option("--compile", help="Compile model with torch.compile (PyTorch only)")
+    ] = False,
 ):
     """Start the TTS server (auto-selects MLX on Apple Silicon)."""
     # Resolve backend
@@ -52,6 +55,8 @@ def serve(
             resolved_backend = Backend.PYTORCH
 
     if resolved_backend == Backend.MLX:
+        if compile:
+            print("Warning: --compile is only supported for PyTorch backend", file=sys.stderr)
         try:
             from pocket_tts_mlx.__main__ import serve as mlx_serve
             mlx_serve(
@@ -80,6 +85,7 @@ def serve(
             temperature=temperature,
             noise_clamp=noise_clamp,
             eos_threshold=eos_threshold,
+            compile=compile,
         )
 
 
@@ -108,6 +114,9 @@ def generate(
     noise_clamp: Annotated[float, typer.Option(help="Noise clamp value")] = 3.0,
     eos_threshold: Annotated[float, typer.Option(help="EOS detection threshold")] = -4.0,
     seed: Annotated[Optional[int], typer.Option(help="Random seed")] = None,
+    compile: Annotated[
+        bool, typer.Option("--compile", help="Compile model with torch.compile (PyTorch only)")
+    ] = False,
 ):
     """Generate speech (auto-selects MLX on Apple Silicon)."""
     # Resolve backend
@@ -122,6 +131,8 @@ def generate(
             resolved_backend = Backend.PYTORCH
 
     if resolved_backend == Backend.MLX:
+        if compile and not quiet:
+            print("Warning: --compile is only supported for PyTorch backend", file=sys.stderr)
         try:
             from pocket_tts_mlx.__main__ import generate as mlx_generate
             mlx_generate(
@@ -155,6 +166,7 @@ def generate(
             noise_clamp=noise_clamp,
             eos_threshold=eos_threshold,
             seed=seed,
+            compile=compile,
         )
 
 

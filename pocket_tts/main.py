@@ -227,6 +227,9 @@ def serve(
     ] = DEFAULT_TEMPERATURE,
     noise_clamp: Annotated[float, typer.Option(help="Noise clamp value")] = DEFAULT_NOISE_CLAMP,
     eos_threshold: Annotated[float, typer.Option(help="EOS detection threshold")] = DEFAULT_EOS_THRESHOLD,
+    compile: Annotated[
+        bool, typer.Option("--compile", help="Compile model with torch.compile for faster CPU inference")
+    ] = False,
 ):
     """Start the FastAPI server."""
 
@@ -238,6 +241,9 @@ def serve(
         noise_clamp,
         eos_threshold,
     )
+
+    if compile:
+        tts_model.compile_model()
 
     # Pre-load the voice prompt
     global_model_state = tts_model.get_state_for_audio_prompt(voice)
@@ -277,6 +283,9 @@ def generate(
     ] = "./tts_output.wav",
     device: Annotated[str, typer.Option(help="Device to use")] = "cpu",
     seed: Annotated[int | None, typer.Option(help="Random seed for reproducibility")] = None,
+    compile: Annotated[
+        bool, typer.Option("--compile", help="Compile model with torch.compile for faster CPU inference")
+    ] = False,
 ):
     """Generate speech using Kyutai Pocket TTS."""
     if "cuda" in device:
@@ -293,6 +302,9 @@ def generate(
             variant, temperature, lsd_decode_steps, noise_clamp, eos_threshold
         )
         tts_model.to(device)
+
+        if compile:
+            tts_model.compile_model()
 
         model_state_for_voice = tts_model.get_state_for_audio_prompt(voice)
         # Stream audio generation directly to file or stdout
