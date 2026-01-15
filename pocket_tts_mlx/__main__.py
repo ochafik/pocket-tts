@@ -78,7 +78,15 @@ async def health():
     return {"status": "healthy", "backend": "mlx"}
 
 
-def _generate_audio_to_queue(queue: Queue, text: str, voice: str | None):
+def _generate_audio_to_queue(
+    queue: Queue,
+    text: str,
+    voice: str | None,
+    temperature: float | None = None,
+    lsd_decode_steps: int | None = None,
+    noise_clamp: float | None = None,
+    eos_threshold: float | None = None,
+):
     """Generate audio in a thread and write chunks to queue."""
     try:
         voice_to_use = voice if voice else default_voice
@@ -94,6 +102,10 @@ def _generate_audio_to_queue(queue: Queue, text: str, voice: str | None):
         audio_chunks = tts_model.generate_audio_stream(
             text=text,
             voice=voice_to_use,
+            temperature=temperature,
+            lsd_decode_steps=lsd_decode_steps,
+            noise_clamp=noise_clamp,
+            eos_threshold=eos_threshold,
         )
         stream_audio_chunks(QueueWriter(), audio_chunks, tts_model.sample_rate)
     except Exception as e:
@@ -101,12 +113,19 @@ def _generate_audio_to_queue(queue: Queue, text: str, voice: str | None):
         queue.put(None)
 
 
-def _stream_audio(text: str, voice: str | None):
+def _stream_audio(
+    text: str,
+    voice: str | None,
+    temperature: float | None = None,
+    lsd_decode_steps: int | None = None,
+    noise_clamp: float | None = None,
+    eos_threshold: float | None = None,
+):
     """Stream audio chunks as they're generated."""
     queue = Queue()
     thread = threading.Thread(
         target=_generate_audio_to_queue,
-        args=(queue, text, voice),
+        args=(queue, text, voice, temperature, lsd_decode_steps, noise_clamp, eos_threshold),
         daemon=True,
     )
     thread.start()
@@ -125,6 +144,10 @@ def text_to_speech(
     text: str = Form(...),
     voice_url: str | None = Form(None),
     voice_wav: UploadFile | None = File(None),
+    temperature: float | None = Form(None),
+    lsd_decode_steps: int | None = Form(None),
+    noise_clamp: float | None = Form(None),
+    eos_threshold: float | None = Form(None),
 ):
     """Generate speech from text.
 
@@ -132,6 +155,10 @@ def text_to_speech(
         text: Text to convert to speech
         voice_url: Optional predefined voice name or URL (http://, https://, hf://)
         voice_wav: Optional uploaded voice file (mutually exclusive with voice_url)
+        temperature: Sampling temperature (overrides server default)
+        lsd_decode_steps: LSD decoding steps (overrides server default)
+        noise_clamp: Noise clamp value (overrides server default)
+        eos_threshold: EOS detection threshold (overrides server default)
     """
     if tts_model is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
@@ -168,7 +195,14 @@ def text_to_speech(
         # Note: temp file will be cleaned up after generation
 
     return StreamingResponse(
-        _stream_audio(text, voice),
+        _stream_audio(
+            text,
+            voice,
+            temperature=temperature,
+            lsd_decode_steps=lsd_decode_steps,
+            noise_clamp=noise_clamp,
+            eos_threshold=eos_threshold,
+        ),
         media_type="audio/wav",
         headers={
             "Content-Disposition": "attachment; filename=generated_speech.wav",

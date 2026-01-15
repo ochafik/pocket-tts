@@ -209,6 +209,10 @@ class TTSModel(nn.Module):
         text_tokens: torch.Tensor | None = None,
         backbone_input_latents: torch.Tensor | None = None,
         audio_conditioning: torch.Tensor | None = None,
+        temperature: float | None = None,
+        lsd_decode_steps: int | None = None,
+        noise_clamp: float | None = None,
+        eos_threshold: float | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """First one is the backbone output, second one is the audio decoding output."""
         if text_tokens is None:
@@ -227,6 +231,10 @@ class TTSModel(nn.Module):
             backbone_input_latents=backbone_input_latents,
             model_state=model_state,
             audio_conditioning=audio_conditioning,
+            temperature=temperature,
+            lsd_decode_steps=lsd_decode_steps,
+            noise_clamp=noise_clamp,
+            eos_threshold=eos_threshold,
         )
         increment_by = (
             text_tokens.shape[1] + backbone_input_latents.shape[1] + audio_conditioning.shape[1]
@@ -240,6 +248,10 @@ class TTSModel(nn.Module):
         text_tokens: torch.Tensor,
         backbone_input_latents: torch.Tensor,
         audio_conditioning: torch.Tensor,
+        temperature: float | None = None,
+        lsd_decode_steps: int | None = None,
+        noise_clamp: float | None = None,
+        eos_threshold: float | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         text_embeddings = self.flow_lm.conditioner(TokenizedText(text_tokens))
         text_embeddings = torch.cat([text_embeddings, audio_conditioning], dim=1)
@@ -248,10 +260,10 @@ class TTSModel(nn.Module):
             backbone_input_latents,
             text_embeddings,
             model_state=model_state,
-            lsd_decode_steps=self.lsd_decode_steps,
-            temp=self.temp,
-            noise_clamp=self.noise_clamp,
-            eos_threshold=self.eos_threshold,
+            lsd_decode_steps=lsd_decode_steps if lsd_decode_steps is not None else self.lsd_decode_steps,
+            temp=temperature if temperature is not None else self.temp,
+            noise_clamp=noise_clamp if noise_clamp is not None else self.noise_clamp,
+            eos_threshold=eos_threshold if eos_threshold is not None else self.eos_threshold,
         )
         return output_embeddings[:, None, :], is_eos
 
@@ -356,6 +368,10 @@ class TTSModel(nn.Module):
         text_to_generate: str,
         frames_after_eos: int | None = None,
         copy_state: bool = True,
+        temperature: float | None = None,
+        lsd_decode_steps: int | None = None,
+        noise_clamp: float | None = None,
+        eos_threshold: float | None = None,
     ):
         """Generate audio streaming chunks from text input.
 
@@ -378,6 +394,10 @@ class TTSModel(nn.Module):
             copy_state: Whether to create a deep copy of the model state before
                 generation. If True, preserves the original state for reuse.
                 If False, modifies the input state in-place. Defaults to True.
+            temperature: Sampling temperature (overrides instance default).
+            lsd_decode_steps: LSD decoding steps (overrides instance default).
+            noise_clamp: Noise clamp value (overrides instance default).
+            eos_threshold: EOS detection threshold (overrides instance default).
 
         Yields:
             torch.Tensor: Audio chunks with shape [samples] at the model's
@@ -408,11 +428,23 @@ class TTSModel(nn.Module):
                 text_to_generate=chunk,
                 frames_after_eos=frames_after_eos_guess,
                 copy_state=copy_state,
+                temperature=temperature,
+                lsd_decode_steps=lsd_decode_steps,
+                noise_clamp=noise_clamp,
+                eos_threshold=eos_threshold,
             )
 
     @torch.no_grad
     def _generate_audio_stream_short_text(
-        self, model_state: dict, text_to_generate: str, frames_after_eos: int, copy_state: bool
+        self,
+        model_state: dict,
+        text_to_generate: str,
+        frames_after_eos: int,
+        copy_state: bool,
+        temperature: float | None = None,
+        lsd_decode_steps: int | None = None,
+        noise_clamp: float | None = None,
+        eos_threshold: float | None = None,
     ):
         if copy_state:
             model_state = copy.deepcopy(model_state)
@@ -436,6 +468,10 @@ class TTSModel(nn.Module):
             frames_after_eos=frames_after_eos,
             latents_queue=latents_queue,
             result_queue=result_queue,
+            temperature=temperature,
+            lsd_decode_steps=lsd_decode_steps,
+            noise_clamp=noise_clamp,
+            eos_threshold=eos_threshold,
         )
 
         # Stream audio chunks as they become available
@@ -483,6 +519,10 @@ class TTSModel(nn.Module):
         frames_after_eos: int,
         latents_queue: queue.Queue,
         result_queue: queue.Queue,
+        temperature: float | None = None,
+        lsd_decode_steps: int | None = None,
+        noise_clamp: float | None = None,
+        eos_threshold: float | None = None,
     ):
         gen_len_sec = len(text_to_generate.split()) * 1 + 2.0
         max_gen_len = int(gen_len_sec * 12.5)
@@ -496,7 +536,14 @@ class TTSModel(nn.Module):
         def run_generation():
             try:
                 self._autoregressive_generation(
-                    model_state, max_gen_len, frames_after_eos, latents_queue
+                    model_state,
+                    max_gen_len,
+                    frames_after_eos,
+                    latents_queue,
+                    temperature=temperature,
+                    lsd_decode_steps=lsd_decode_steps,
+                    noise_clamp=noise_clamp,
+                    eos_threshold=eos_threshold,
                 )
             except Exception as e:
                 logger.error(f"Error in autoregressive generation: {e}")
@@ -512,7 +559,15 @@ class TTSModel(nn.Module):
 
     @torch.no_grad
     def _autoregressive_generation(
-        self, model_state: dict, max_gen_len: int, frames_after_eos: int, latents_queue: queue.Queue
+        self,
+        model_state: dict,
+        max_gen_len: int,
+        frames_after_eos: int,
+        latents_queue: queue.Queue,
+        temperature: float | None = None,
+        lsd_decode_steps: int | None = None,
+        noise_clamp: float | None = None,
+        eos_threshold: float | None = None,
     ):
         backbone_input = torch.full(
             (1, 1, self.flow_lm.ldim),
@@ -525,7 +580,12 @@ class TTSModel(nn.Module):
         for generation_step in range(max_gen_len):
             with display_execution_time("Generating latent", print_output=False) as timer:
                 next_latent, is_eos = self._run_flow_lm_and_increment_step(
-                    model_state=model_state, backbone_input_latents=backbone_input
+                    model_state=model_state,
+                    backbone_input_latents=backbone_input,
+                    temperature=temperature,
+                    lsd_decode_steps=lsd_decode_steps,
+                    noise_clamp=noise_clamp,
+                    eos_threshold=eos_threshold,
                 )
                 if is_eos.item() and eos_step is None:
                     eos_step = generation_step

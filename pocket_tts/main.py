@@ -71,7 +71,15 @@ async def health():
     return {"status": "healthy"}
 
 
-def write_to_queue(queue, text_to_generate, model_state):
+def write_to_queue(
+    queue,
+    text_to_generate,
+    model_state,
+    temperature: float | None = None,
+    lsd_decode_steps: int | None = None,
+    noise_clamp: float | None = None,
+    eos_threshold: float | None = None,
+):
     """Allows writing to the StreamingResponse as if it were a file."""
 
     class FileLikeToQueue(io.IOBase):
@@ -88,16 +96,31 @@ def write_to_queue(queue, text_to_generate, model_state):
             self.queue.put(None)
 
     audio_chunks = tts_model.generate_audio_stream(
-        model_state=model_state, text_to_generate=text_to_generate
+        model_state=model_state,
+        text_to_generate=text_to_generate,
+        temperature=temperature,
+        lsd_decode_steps=lsd_decode_steps,
+        noise_clamp=noise_clamp,
+        eos_threshold=eos_threshold,
     )
     stream_audio_chunks(FileLikeToQueue(queue), audio_chunks, tts_model.config.mimi.sample_rate)
 
 
-def generate_data_with_state(text_to_generate: str, model_state: dict):
+def generate_data_with_state(
+    text_to_generate: str,
+    model_state: dict,
+    temperature: float | None = None,
+    lsd_decode_steps: int | None = None,
+    noise_clamp: float | None = None,
+    eos_threshold: float | None = None,
+):
     queue = Queue()
 
     # Run your function in a thread
-    thread = threading.Thread(target=write_to_queue, args=(queue, text_to_generate, model_state))
+    thread = threading.Thread(
+        target=write_to_queue,
+        args=(queue, text_to_generate, model_state, temperature, lsd_decode_steps, noise_clamp, eos_threshold),
+    )
     thread.start()
 
     # Yield data as it becomes available
@@ -117,6 +140,10 @@ def text_to_speech(
     text: str = Form(...),
     voice_url: str | None = Form(None),
     voice_wav: UploadFile | None = File(None),
+    temperature: float | None = Form(None),
+    lsd_decode_steps: int | None = Form(None),
+    noise_clamp: float | None = Form(None),
+    eos_threshold: float | None = Form(None),
 ):
     """
     Generate speech from text using the pre-loaded voice prompt or a custom voice.
@@ -125,6 +152,10 @@ def text_to_speech(
         text: Text to convert to speech
         voice_url: Optional voice URL (http://, https://, or hf://)
         voice_wav: Optional uploaded voice file (mutually exclusive with voice_url)
+        temperature: Sampling temperature (overrides server default)
+        lsd_decode_steps: LSD decoding steps (overrides server default)
+        noise_clamp: Noise clamp value (overrides server default)
+        eos_threshold: EOS detection threshold (overrides server default)
     """
     if not text.strip():
         raise HTTPException(status_code=400, detail="Text cannot be empty")
@@ -163,7 +194,14 @@ def text_to_speech(
         model_state = global_model_state
 
     return StreamingResponse(
-        generate_data_with_state(text, model_state),
+        generate_data_with_state(
+            text,
+            model_state,
+            temperature=temperature,
+            lsd_decode_steps=lsd_decode_steps,
+            noise_clamp=noise_clamp,
+            eos_threshold=eos_threshold,
+        ),
         media_type="audio/wav",
         headers={
             "Content-Disposition": "attachment; filename=generated_speech.wav",
@@ -180,11 +218,26 @@ def serve(
     host: Annotated[str, typer.Option(help="Host to bind to")] = "localhost",
     port: Annotated[int, typer.Option(help="Port to bind to")] = 8000,
     reload: Annotated[bool, typer.Option(help="Enable auto-reload")] = False,
+    variant: Annotated[str, typer.Option(help="Model variant")] = DEFAULT_VARIANT,
+    lsd_decode_steps: Annotated[
+        int, typer.Option(help="Number of LSD decoding steps")
+    ] = DEFAULT_LSD_DECODE_STEPS,
+    temperature: Annotated[
+        float, typer.Option(help="Sampling temperature")
+    ] = DEFAULT_TEMPERATURE,
+    noise_clamp: Annotated[float, typer.Option(help="Noise clamp value")] = DEFAULT_NOISE_CLAMP,
+    eos_threshold: Annotated[float, typer.Option(help="EOS detection threshold")] = DEFAULT_EOS_THRESHOLD,
 ):
     """Start the FastAPI server."""
 
     global tts_model, global_model_state
-    tts_model = TTSModel.load_model(DEFAULT_VARIANT)
+    tts_model = TTSModel.load_model(
+        variant,
+        temperature,
+        lsd_decode_steps,
+        noise_clamp,
+        eos_threshold,
+    )
 
     # Pre-load the voice prompt
     global_model_state = tts_model.get_state_for_audio_prompt(voice)

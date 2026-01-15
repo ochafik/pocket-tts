@@ -98,6 +98,10 @@ class TTSModel(nn.Module):
         text_tokens: mx.array | None = None,
         backbone_input_latents: mx.array | None = None,
         audio_conditioning: mx.array | None = None,
+        temperature: float | None = None,
+        lsd_decode_steps: int | None = None,
+        noise_clamp: float | None = None,
+        eos_threshold: float | None = None,
     ) -> tuple[mx.array, mx.array]:
         """Run FlowLM for one step.
 
@@ -105,6 +109,10 @@ class TTSModel(nn.Module):
             text_tokens: Optional text tokens [B, T]
             backbone_input_latents: Optional input latents [B, T, ldim]
             audio_conditioning: Optional audio conditioning [B, T, dim]
+            temperature: Sampling temperature (overrides instance default)
+            lsd_decode_steps: LSD decoding steps (overrides instance default)
+            noise_clamp: Noise clamp value (overrides instance default)
+            eos_threshold: EOS threshold (overrides instance default)
 
         Returns:
             Tuple of (output_latent, is_eos)
@@ -125,10 +133,10 @@ class TTSModel(nn.Module):
         output_embeddings, is_eos = self.flow_lm.sample_next_latent(
             backbone_input_latents,
             text_embeddings,
-            lsd_decode_steps=self.lsd_decode_steps,
-            temp=self.temp,
-            noise_clamp=self.noise_clamp,
-            eos_threshold=self.eos_threshold,
+            lsd_decode_steps=lsd_decode_steps if lsd_decode_steps is not None else self.lsd_decode_steps,
+            temp=temperature if temperature is not None else self.temp,
+            noise_clamp=noise_clamp if noise_clamp is not None else self.noise_clamp,
+            eos_threshold=eos_threshold if eos_threshold is not None else self.eos_threshold,
         )
         return output_embeddings, is_eos
 
@@ -138,6 +146,10 @@ class TTSModel(nn.Module):
         voice: str | Path | mx.array | None = None,
         max_duration_sec: float = 30.0,
         frames_after_eos: int = 3,
+        temperature: float | None = None,
+        lsd_decode_steps: int | None = None,
+        noise_clamp: float | None = None,
+        eos_threshold: float | None = None,
     ) -> mx.array:
         """Generate audio from text.
 
@@ -150,6 +162,10 @@ class TTSModel(nn.Module):
                 - None: No voice conditioning
             max_duration_sec: Maximum generation duration in seconds
             frames_after_eos: Frames to generate after EOS detection
+            temperature: Sampling temperature (overrides instance default)
+            lsd_decode_steps: LSD decoding steps (overrides instance default)
+            noise_clamp: Noise clamp value (overrides instance default)
+            eos_threshold: EOS threshold (overrides instance default)
 
         Returns:
             Audio tensor [T] at sample_rate
@@ -160,6 +176,10 @@ class TTSModel(nn.Module):
                 voice=voice,
                 max_duration_sec=max_duration_sec,
                 frames_after_eos=frames_after_eos,
+                temperature=temperature,
+                lsd_decode_steps=lsd_decode_steps,
+                noise_clamp=noise_clamp,
+                eos_threshold=eos_threshold,
             )
         )
         return mx.concatenate(chunks, axis=0)
@@ -170,6 +190,10 @@ class TTSModel(nn.Module):
         voice: str | Path | mx.array | None = None,
         max_duration_sec: float = 30.0,
         frames_after_eos: int = 3,
+        temperature: float | None = None,
+        lsd_decode_steps: int | None = None,
+        noise_clamp: float | None = None,
+        eos_threshold: float | None = None,
     ) -> Iterator[mx.array]:
         """Generate audio from text with streaming output.
 
@@ -178,6 +202,10 @@ class TTSModel(nn.Module):
             voice: Voice conditioning (see generate_audio)
             max_duration_sec: Maximum generation duration
             frames_after_eos: Frames after EOS
+            temperature: Sampling temperature (overrides instance default)
+            lsd_decode_steps: LSD decoding steps (overrides instance default)
+            noise_clamp: Noise clamp value (overrides instance default)
+            eos_threshold: EOS threshold (overrides instance default)
 
         Yields:
             Audio chunks [T_chunk]
@@ -224,7 +252,13 @@ class TTSModel(nn.Module):
 
         for step in range(max_gen_len):
             # Generate next latent
-            next_latent, is_eos = self._run_flow_lm(backbone_input_latents=backbone_input)
+            next_latent, is_eos = self._run_flow_lm(
+                backbone_input_latents=backbone_input,
+                temperature=temperature,
+                lsd_decode_steps=lsd_decode_steps,
+                noise_clamp=noise_clamp,
+                eos_threshold=eos_threshold,
+            )
 
             # Decode to audio (build full graph before eval)
             mimi_input = next_latent * self.flow_lm.emb_std + self.flow_lm.emb_mean
