@@ -13,9 +13,17 @@ export interface TTSConfig {
 
 export interface StreamingTTSOptions {
   onStart?: () => void;
-  onProgress?: (elapsedSeconds: number, totalSeconds: number) => void;
+  onProgress?: (elapsedSeconds: number, totalSeconds: number, charPosition: number) => void;
   onEnd?: (completed: boolean) => void;
   onError?: (error: string) => void;
+}
+
+/** Timing info for a text chunk, used for karaoke sync */
+interface ChunkTiming {
+  charStart: number;
+  charEnd: number;
+  audioStartTime: number;
+  audioEndTime: number;
 }
 
 export class StreamingTTS {
@@ -31,6 +39,11 @@ export class StreamingTTS {
   private progressInterval: number | null = null;
   private aborted = false;
   private allAudioReceived = false;
+
+  // Karaoke sync: chunk timing data from server
+  private chunkTimings: ChunkTiming[] = [];
+  private pendingChunk: { charStart: number; charEnd: number } | null = null;
+  private currentChunkAudioStart: number | null = null;
 
   /**
    * Start streaming TTS session.
@@ -48,6 +61,9 @@ export class StreamingTTS {
     this.nextPlayTime = 0;
     this.playbackStartTime = 0;
     this.allAudioReceived = false;
+    this.chunkTimings = [];
+    this.pendingChunk = null;
+    this.currentChunkAudioStart = null;
 
     return new Promise((resolve, reject) => {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -107,6 +123,31 @@ export class StreamingTTS {
         resolve();
         break;
 
+      case 'processing':
+        // Server is about to send audio for this text chunk
+        // Store the character range for association with incoming audio
+        this.pendingChunk = {
+          charStart: msg.char_offset as number,
+          charEnd: (msg.char_offset as number) + (msg.char_length as number),
+        };
+        this.currentChunkAudioStart = null; // Reset for new chunk
+        break;
+
+      case 'chunk_done':
+        // Server finished sending audio for this chunk
+        // Finalize timing using the scheduled playback times
+        if (this.pendingChunk && this.currentChunkAudioStart !== null) {
+          this.chunkTimings.push({
+            charStart: this.pendingChunk.charStart,
+            charEnd: this.pendingChunk.charEnd,
+            audioStartTime: this.currentChunkAudioStart,
+            audioEndTime: this.nextPlayTime,
+          });
+        }
+        this.pendingChunk = null;
+        this.currentChunkAudioStart = null;
+        break;
+
       case 'done':
         // All audio received - now we have stable duration for progress
         this.allAudioReceived = true;
@@ -154,6 +195,11 @@ export class StreamingTTS {
       this.startProgressTracking();
     }
 
+    // Track first audio blob's start time for current chunk (karaoke sync)
+    if (this.currentChunkAudioStart === null) {
+      this.currentChunkAudioStart = startTime;
+    }
+
     source.start(startTime);
     this.nextPlayTime = startTime + audioBuffer.duration;
     this.totalDuration += audioBuffer.duration;
@@ -194,9 +240,59 @@ export class StreamingTTS {
       const duration = this.allAudioReceived ? this.finalDuration : this.totalDuration;
 
       if (elapsed >= 0 && elapsed <= duration) {
-        this.options.onProgress?.(elapsed, duration);
+        // Get accurate character position from chunk timings
+        const charPosition = this.getCharacterPosition(currentTime);
+        this.options.onProgress?.(elapsed, duration, charPosition);
       }
     }, 50);
+  }
+
+  /**
+   * Get accurate character position based on current playback time.
+   * Uses chunk timing data from server for precise karaoke sync.
+   */
+  private getCharacterPosition(currentTime: number): number {
+    // If no timing data yet, fall back to estimate
+    if (this.chunkTimings.length === 0) {
+      const elapsed = currentTime - this.playbackStartTime;
+      // Fallback: estimate at ~12 chars/second
+      return Math.floor(elapsed * 12);
+    }
+
+    // Find the chunk that contains currentTime
+    for (const chunk of this.chunkTimings) {
+      if (currentTime >= chunk.audioStartTime && currentTime < chunk.audioEndTime) {
+        // Linear interpolation within chunk
+        const chunkDuration = chunk.audioEndTime - chunk.audioStartTime;
+        if (chunkDuration <= 0) return chunk.charStart;
+
+        const progress = (currentTime - chunk.audioStartTime) / chunkDuration;
+        const charRange = chunk.charEnd - chunk.charStart;
+        return Math.floor(chunk.charStart + progress * charRange);
+      }
+    }
+
+    // Before first chunk
+    if (this.chunkTimings.length > 0 && currentTime < this.chunkTimings[0].audioStartTime) {
+      return 0;
+    }
+
+    // After last chunk - return end of last chunk
+    const lastChunk = this.chunkTimings[this.chunkTimings.length - 1];
+    if (currentTime >= lastChunk.audioEndTime) {
+      return lastChunk.charEnd;
+    }
+
+    // Between chunks (shouldn't happen with gapless playback, but handle it)
+    for (let i = 0; i < this.chunkTimings.length - 1; i++) {
+      const curr = this.chunkTimings[i];
+      const next = this.chunkTimings[i + 1];
+      if (currentTime >= curr.audioEndTime && currentTime < next.audioStartTime) {
+        return curr.charEnd;
+      }
+    }
+
+    return 0;
   }
 
   private stopProgressTracking() {

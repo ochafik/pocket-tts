@@ -68,14 +68,10 @@ export function App() {
       onStart: () => {
         console.log('[TTS] Started');
       },
-      onProgress: (elapsed, total) => {
-        // Use elapsed time directly with estimated speaking rate
-        // Average speaking rate is ~150 wpm = ~12.5 chars/sec (assuming 5 chars/word)
-        const CHARS_PER_SECOND = 12;
-        const estimatedChar = Math.floor(elapsed * CHARS_PER_SECOND);
-
-        // Snap to word boundary
-        const wordBoundary = findWordBoundary(textRef.current, estimatedChar);
+      onProgress: (_elapsed, _total, charPosition) => {
+        // Use accurate character position from server chunk timing
+        // Snap to word boundary for clean highlighting
+        const wordBoundary = findWordBoundary(textRef.current, charPosition);
 
         // Clamp to text length
         const clampedBoundary = Math.min(wordBoundary, textRef.current.length);
