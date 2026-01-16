@@ -35,6 +35,7 @@ export class StreamingTTS {
   private totalDuration = 0;
   private finalDuration = 0; // Set once all audio received
   private isPlaying = false;
+  private isPaused = false;
   private options: StreamingTTSOptions = {};
   private progressInterval: number | null = null;
   private aborted = false;
@@ -56,6 +57,7 @@ export class StreamingTTS {
     this.stop();
     this.options = options;
     this.aborted = false;
+    this.isPaused = false;
     this.totalDuration = 0;
     this.finalDuration = 0;
     this.nextPlayTime = 0;
@@ -303,10 +305,45 @@ export class StreamingTTS {
   }
 
   /**
-   * Stop playback.
+   * Pause playback (can be resumed).
+   */
+  pause() {
+    if (this.audioContext && this.isPlaying && !this.isPaused) {
+      this.audioContext.suspend();
+      this.isPaused = true;
+    }
+  }
+
+  /**
+   * Resume paused playback.
+   */
+  resume() {
+    if (this.audioContext && this.isPaused) {
+      this.audioContext.resume();
+      this.isPaused = false;
+    }
+  }
+
+  /**
+   * Check if playback is paused.
+   */
+  get paused(): boolean {
+    return this.isPaused;
+  }
+
+  /**
+   * Check if playback is active (playing or paused).
+   */
+  get active(): boolean {
+    return this.isPlaying;
+  }
+
+  /**
+   * Stop playback completely.
    */
   stop() {
     this.aborted = true;
+    this.isPaused = false;
     this.stopProgressTracking();
     this.ws?.close();
     this.ws = null;

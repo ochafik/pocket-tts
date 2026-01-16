@@ -39,6 +39,7 @@ function findWordsAhead(text: string, charIndex: number, numWords: number): numb
 
 export function App() {
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [playbackPosition, setPlaybackPosition] = useState(0);
   const [hasBeenPlayed, setHasBeenPlayed] = useState(false);
   const [voice, setVoice] = useState('cosette');
@@ -62,6 +63,7 @@ export function App() {
     lastBoundaryRef.current = -1;
 
     setIsSpeaking(true);
+    setIsPaused(false);
     setPlaybackPosition(0);
 
     tts.start(textRef.current, { voice }, {
@@ -70,11 +72,12 @@ export function App() {
       },
       onProgress: (_elapsed, _total, charPosition) => {
         // Use accurate character position from server chunk timing
-        // Snap to word boundary for clean highlighting
+        // Snap to word boundary, then advance one word for better visual sync
         const wordBoundary = findWordBoundary(textRef.current, charPosition);
+        const advancedBoundary = findWordsAhead(textRef.current, wordBoundary, 1);
 
         // Clamp to text length
-        const clampedBoundary = Math.min(wordBoundary, textRef.current.length);
+        const clampedBoundary = Math.min(advancedBoundary, textRef.current.length);
 
         // Only update if boundary changed
         if (clampedBoundary !== lastBoundaryRef.current) {
@@ -103,15 +106,34 @@ export function App() {
   const handleStop = useCallback(() => {
     ttsRef.current?.stop();
     setIsSpeaking(false);
+    setIsPaused(false);
   }, []);
 
-  const handleClick = useCallback(() => {
-    if (isSpeaking) {
-      handleStop();
+  const handlePauseResume = useCallback(() => {
+    const tts = ttsRef.current;
+    if (!tts) {
+      // No active session - start fresh
+      handlePlay();
+      return;
+    }
+
+    if (tts.paused) {
+      // Resume paused playback
+      tts.resume();
+      setIsPaused(false);
+    } else if (tts.active) {
+      // Pause active playback
+      tts.pause();
+      setIsPaused(true);
     } else {
+      // Session ended - start fresh
       handlePlay();
     }
-  }, [isSpeaking, handlePlay, handleStop]);
+  }, [handlePlay]);
+
+  const handleClick = useCallback(() => {
+    handlePauseResume();
+  }, [handlePauseResume]);
 
   const handleDoubleClick = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -202,7 +224,7 @@ export function App() {
       </div>
 
       <div className="status">
-        {isSpeaking ? 'Speaking...' : hasBeenPlayed ? 'Finished' : 'Ready'}
+        {isPaused ? 'Paused' : isSpeaking ? 'Speaking...' : hasBeenPlayed ? 'Finished' : 'Ready'}
       </div>
     </div>
   );
