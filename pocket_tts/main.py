@@ -253,5 +253,67 @@ def generate(
         )
 
 
+# ------------------------------------------------------
+# Speaker fingerprinting CLI commands
+# ------------------------------------------------------
+
+speaker_app = typer.Typer(help="Speaker fingerprinting and identification commands")
+cli_app.add_typer(speaker_app, name="speaker")
+
+
+@speaker_app.command()
+def embed(
+    audio: Annotated[str, typer.Argument(help="Path to audio file")],
+    output: Annotated[str, typer.Option(help="Output path for fingerprint JSON")] = "",
+    backend: Annotated[
+        str, typer.Option(help="Embedding backend: ecapa, resemblyzer, or mimi")
+    ] = "ecapa",
+    quiet: Annotated[bool, typer.Option("-q", "--quiet", help="Disable logging")] = False,
+):
+    """Extract a speaker fingerprint from an audio file."""
+    log_level = logging.ERROR if quiet else logging.INFO
+    with enable_logging("pocket_tts", log_level):
+        from pocket_tts.speaker_id import SpeakerID
+
+        sid = SpeakerID.load(backend=backend)
+        fp = sid.embed_file(audio)
+        if not output:
+            output = Path(audio).stem + ".fingerprint.json"
+        fp.save(output)
+        logger.info("Speaker fingerprint saved to %s (dim=%d, backend=%s)", output, len(fp.embedding), fp.backend)
+
+
+@speaker_app.command()
+def compare(
+    file_a: Annotated[str, typer.Argument(help="First audio file or fingerprint JSON")],
+    file_b: Annotated[str, typer.Argument(help="Second audio file or fingerprint JSON")],
+    backend: Annotated[
+        str, typer.Option(help="Embedding backend: ecapa, resemblyzer, or mimi")
+    ] = "ecapa",
+    threshold: Annotated[float | None, typer.Option(help="Similarity threshold override")] = None,
+    quiet: Annotated[bool, typer.Option("-q", "--quiet", help="Disable logging")] = False,
+):
+    """Compare two audio files or fingerprints and report speaker similarity."""
+    log_level = logging.ERROR if quiet else logging.INFO
+    with enable_logging("pocket_tts", log_level):
+        from pocket_tts.speaker_id import SpeakerFingerprint, SpeakerID
+
+        sid = SpeakerID.load(backend=backend, threshold=threshold)
+
+        def load_or_embed(path: str) -> SpeakerFingerprint:
+            if path.endswith(".json"):
+                return SpeakerFingerprint.load(path)
+            return sid.embed_file(path)
+
+        fp_a = load_or_embed(file_a)
+        fp_b = load_or_embed(file_b)
+
+        score = sid.similarity(fp_a, fp_b)
+        same = sid.is_same_speaker(fp_a, fp_b)
+        verdict = "SAME speaker" if same else "DIFFERENT speakers"
+        typer.echo(f"Similarity: {score:.4f} (threshold: {sid.threshold:.4f})")
+        typer.echo(f"Verdict: {verdict}")
+
+
 if __name__ == "__main__":
     cli_app()

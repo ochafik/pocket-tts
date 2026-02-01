@@ -13,4 +13,7 @@ from pocket_tts.models.tts_model import TTSModel  # noqa: E402
 # TTSModel.generate_audio_stream
 # TTSModel.get_state_for_audio_prompt
 
+# Speaker fingerprinting (lazy import to avoid pulling heavy deps at package load):
+# from pocket_tts.speaker_id import SpeakerID, SpeakerFingerprint
+
 __all__ = ["TTSModel"]
